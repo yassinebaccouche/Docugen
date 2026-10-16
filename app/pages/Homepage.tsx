@@ -1766,11 +1766,7 @@ export default function Homepage() {
       setAuthMode(null);
       notify(`Bienvenue sur DocuGen, ${profile.name.split(" ")[0]}`);
     } catch (error) {
-      setAuthError(
-        error instanceof Error
-          ? error.message
-          : "Impossible de se connecter avec Google.",
-      );
+      setAuthError(AuthController.getGoogleSignInErrorMessage(error));
     } finally {
       setIsAuthenticating(false);
     }

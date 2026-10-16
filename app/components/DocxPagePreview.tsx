@@ -32,17 +32,21 @@ export default function DocxPagePreview({
     async function renderPreview(previewContainer: HTMLSpanElement) {
       try {
         const sourceUrl = new URL(src, window.location.href);
-        if (
-          sourceUrl.protocol !== "https:" ||
-          sourceUrl.hostname !== "res.cloudinary.com" ||
-          !sourceUrl.pathname.includes("/raw/upload/")
-        ) {
+        const isCloudinaryRawFile =
+          sourceUrl.protocol === "https:" &&
+          sourceUrl.hostname === "res.cloudinary.com" &&
+          sourceUrl.pathname.includes("/raw/upload/");
+        const isSameOriginTemplatePreview =
+          sourceUrl.origin === window.location.origin &&
+          /^\/api\/templates\/[^/]+\/preview$/.test(sourceUrl.pathname);
+        if (!isCloudinaryRawFile && !isSameOriginTemplatePreview) {
           throw new Error("Le document DOCX n’est pas enregistré comme fichier Raw Cloudinary.");
         }
         const response = await fetch(sourceUrl, {
           signal: abortController.signal,
-          mode: "cors",
-          credentials: "omit",
+          ...(isSameOriginTemplatePreview
+            ? {}
+            : { mode: "cors" as const, credentials: "omit" as const }),
         });
         if (!response.ok) {
           throw new Error(`DOCX preview request failed (${response.status}).`);

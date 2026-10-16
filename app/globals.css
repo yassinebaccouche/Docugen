@@ -1194,8 +1194,8 @@ button {
 
 .upload-template-icon {
   display: grid;
-  width: 100px;
-  height: 133px;
+  width: min(100%, 190px);
+  height: 232px;
   flex: 0 0 auto;
   place-items: center;
   border: 1px solid #e9ecef;
@@ -1994,12 +1994,12 @@ button {
 
 .recent-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 20px;
 }
 
 .recent-preview {
-  height: 143px;
+  height: 280px;
 }
 
 .recent-meta {
@@ -2007,7 +2007,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 10px 10px 11px;
+  padding: 14px;
 }
 
 .recent-copy {
@@ -2019,7 +2019,7 @@ button {
 .recent-title {
   overflow: hidden;
   color: #3d4a41;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2030,7 +2030,7 @@ button {
   align-items: center;
   gap: 6px;
   color: #929c94;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .recent-date .doc-icon {
@@ -3500,8 +3500,8 @@ button {
 
 .uploaded-template-card .uploaded-template-preview {
   display: grid;
-  width: 100px;
-  height: 133px;
+  width: min(100%, 190px);
+  height: 232px;
   flex: 0 0 auto;
   overflow: hidden;
   place-items: center;
@@ -3687,21 +3687,29 @@ button {
 }
 
 .template-strip {
-  display: flex;
-  overflow-x: auto;
-  gap: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 16px;
   padding: 2px 1px 12px;
-  scroll-snap-type: x mandatory;
-  scrollbar-color: #c9cdd3 transparent;
-  scrollbar-width: thin;
 }
 
 .template-card {
-  width: 142px;
-  min-width: 142px;
-  min-height: 192px;
-  flex: 0 0 142px;
-  scroll-snap-align: start;
+  width: 100%;
+  min-width: 0;
+  min-height: 290px;
+  padding: 16px 12px;
+}
+
+.uploaded-template-card {
+  min-height: 318px;
+}
+
+.uploaded-template-card .template-title {
+  font-size: 13px;
+}
+
+.uploaded-template-card .template-subtitle {
+  font-size: 11px;
 }
 
 @media (max-width: 680px) {
@@ -3732,25 +3740,34 @@ button {
 
 @media (max-width: 900px) {
   .template-strip {
-    grid-template-columns: none;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));
   }
 }
 
 @media (max-width: 600px) {
   .template-strip {
-    grid-template-columns: none;
-    gap: 9px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-right: 0;
+    padding-right: 0;
   }
 
   .template-card {
-    width: 142px;
-    min-width: 142px;
-    min-height: 178px;
-    flex-basis: 142px;
+    min-height: 242px;
+    padding: 12px 8px;
+  }
+
+  .uploaded-template-card {
+    min-height: 258px;
+  }
+
+  .uploaded-template-card .uploaded-template-preview {
+    height: 176px;
   }
 
   .upload-template-icon {
-    height: 119px;
+    width: min(100%, 190px);
+    height: 176px;
   }
 }
 
@@ -3824,15 +3841,15 @@ button {
   }
 
   .template-strip {
-    gap: 11px;
-    margin-right: -16px;
-    padding: 2px 16px 14px 1px;
-    scroll-padding-left: 1px;
-    -webkit-overflow-scrolling: touch;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-right: 0;
+    padding: 2px 0 14px;
   }
 
   .template-card {
-    min-height: 178px;
+    min-height: 242px;
+    padding: 12px 8px;
     border-radius: 11px;
   }
 
@@ -3879,11 +3896,11 @@ button {
 
   .recent-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
+    gap: 12px;
   }
 
   .recent-preview {
-    height: 118px;
+    height: 190px;
   }
 
   .recent-meta {
@@ -3988,7 +4005,7 @@ button {
   }
 
   .recent-preview {
-    height: 150px;
+    height: 250px;
   }
 
   .template-actions > button:first-child {

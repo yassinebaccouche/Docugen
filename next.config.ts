@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
     "/api/docx-templates/*/import": ["./app/Docx/**/*"],
     "/api/generate": ["./app/Docx/**/*"],
     "/api/templates/*/inspect": ["./app/Docx/**/*"],
+    "/api/templates/*/preview": ["./app/Docx/**/*"],
     "/api/templates/*/thumbnail": ["./app/Docx/**/*"],
   },
   turbopack: {

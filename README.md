@@ -68,6 +68,12 @@ providers you plan to use in the Firebase console and deploy
 configuration in `app/Firebase/Config.js` identifies the Firebase project; it
 does not contain a server credential.
 
+For Google sign-in on a hosted website, enable the Google provider in Firebase
+Authentication and add the website hostname under **Authentication → Settings
+→ Authorized domains**. Add the production hostname (and any preview hostname
+you test). An `auth/unauthorized-domain` error means the current hostname is
+not on that list; `auth/operation-not-allowed` means Google sign-in is disabled.
+
 After signup, the app creates a Firestore document at `users/{uid}` with the
 user's `id`/`uid`, `email`, and `name`/`nom` fields, along with profile
 metadata. Firestore creates the `users` collection automatically when this
@@ -128,12 +134,11 @@ limits. Shared projects are only shown to signed-in users.
 
 ### DOCX editing and previews
 
-The in-app editor is text-focused. It updates paragraph text in the DOCX while
+Template cards render the first page of the actual DOCX file. The in-app editor
+is text-focused. It updates paragraph text in the DOCX while
 preserving other package parts such as images and tables, but does not render
-images on the editing canvas. Uploaded template cards prefer the DOCX's own
-embedded thumbnail; when there is none, they use the first supported raster
-image embedded in the document. A neutral placeholder is shown if no image is
-available.
+images on the editing canvas. A neutral placeholder is shown if a document
+preview cannot be rendered.
 
 Only upload trusted files.
 
