@@ -7,6 +7,13 @@ const nextConfig: NextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
+  outputFileTracingIncludes: {
+    "/api/docx-templates": ["./app/Docx/**/*"],
+    "/api/docx-templates/*/import": ["./app/Docx/**/*"],
+    "/api/generate": ["./app/Docx/**/*"],
+    "/api/templates/*/inspect": ["./app/Docx/**/*"],
+    "/api/templates/*/thumbnail": ["./app/Docx/**/*"],
+  },
   turbopack: {
     rules: {
       "*.css": {

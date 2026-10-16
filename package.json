@@ -9,7 +9,15 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "csv-parse": "^7.0.3",
+    "docx-preview": "^0.4.1",
+    "docxtemplater": "^3.71.0",
+    "exceljs": "^4.4.0",
+    "firebase": "^13.0.0",
+    "html-to-image": "^1.11.13",
+    "lodash": "^4.18.1",
     "next": "16.4.0",
+    "pizzip": "^3.3.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

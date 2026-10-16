@@ -1,0 +1,136 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    match /{path=**}/invitations/{invitationId} {
+      allow read: if request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.lower() == resource.data.recipientEmail;
+    }
+
+    match /sharedWith/{recipientKey}/documents/{shareId} {
+      allow read: if request.auth != null
+        && request.auth.token.email != null
+        && recipientKey == request.auth.token.email.lower();
+      allow create, update: if request.auth != null
+        && request.auth.uid == request.resource.data.ownerId
+        && recipientKey == request.resource.data.recipientEmail
+        && request.resource.data.recipientEmail is string
+        && request.resource.data.documentId is string
+        && request.resource.data.title is string
+        && request.resource.data.url is string;
+      allow delete: if request.auth != null
+        && (
+          request.auth.uid == resource.data.ownerId
+          || (
+            request.auth.token.email != null
+            && request.auth.token.email.lower() == resource.data.recipientEmail
+          )
+        );
+    }
+
+    match /documents/{documentId} {
+      allow read, delete: if request.auth != null
+        && request.auth.uid == resource.data.userId;
+      allow create: if request.auth != null
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'userId', 'title', 'fileName', 'kind', 'url', 'storageProvider',
+          'templateId', 'thumbnailUrl', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.title is string
+        && request.resource.data.fileName is string
+        && request.resource.data.url is string
+        && request.resource.data.storageProvider in ['local', 'cloudinary']
+        && (
+          request.resource.data.thumbnailUrl == null
+          || request.resource.data.thumbnailUrl is string
+        );
+      allow update: if request.auth != null
+        && request.auth.uid == resource.data.userId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.keys().hasOnly([
+          'userId', 'title', 'fileName', 'kind', 'url', 'storageProvider',
+          'templateId', 'thumbnailUrl', 'createdAt', 'updatedAt'
+        ]);
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.keys().hasOnly([
+          'id', 'uid', 'email', 'name', 'nom', 'role', 'profilePic', 'createdAt', 'updatedAt'
+        ])
+        && request.resource.data.id == userId
+        && request.resource.data.uid == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.name == request.resource.data.nom
+        && request.resource.data.role == 'user';
+      allow update: if isOwner(userId)
+        && request.resource.data.id == userId
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role;
+      allow delete: if false;
+
+      match /documents/{documentId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'userId', 'title', 'fileName', 'kind', 'url', 'storageProvider', 'templateId', 'thumbnailUrl', 'createdAt', 'updatedAt'
+          ])
+          && request.resource.data.userId == userId
+          && request.resource.data.title is string
+          && request.resource.data.fileName is string
+          && request.resource.data.url is string
+          && request.resource.data.storageProvider in ['local', 'cloudinary'];
+      }
+
+      match /invitations/{invitationId} {
+        allow read: if isOwner(userId)
+          || (
+            request.auth != null
+            && request.auth.token.email != null
+            && request.auth.token.email.lower() == resource.data.recipientEmail
+          );
+        allow create, update: if isOwner(userId)
+          && request.resource.data.ownerId == userId
+          && request.resource.data.recipientEmail is string
+          && request.resource.data.documentId is string
+          && request.resource.data.title is string;
+        allow delete: if isOwner(userId);
+      }
+
+      match /generationFolders/{folderId} {
+        allow read, delete: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly([
+            'id', 'name', 'createdAt', 'updatedAt'
+          ])
+          && request.resource.data.id == folderId
+          && request.resource.data.name is string
+          && request.resource.data.name.size() > 0
+          && request.resource.data.name.size() <= 80
+          && request.resource.data.createdAt is string
+          && request.resource.data.updatedAt is string;
+
+        match /documents/{documentId} {
+          allow read, delete: if isOwner(userId);
+          allow create, update: if isOwner(userId)
+            && request.resource.data.keys().hasOnly([
+              'title', 'fileName', 'kind', 'url', 'createdAt'
+            ])
+            && request.resource.data.title is string
+            && request.resource.data.fileName is string
+            && request.resource.data.kind in ['generated', 'source', 'archive']
+            && request.resource.data.url is string
+            && request.resource.data.createdAt is string;
+        }
+      }
+    }
+  }
+}
