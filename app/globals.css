@@ -1994,12 +1994,13 @@ button {
 
 .recent-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
   gap: 20px;
 }
 
 .recent-preview {
-  height: 280px;
+  height: auto;
+  aspect-ratio: 1.08;
 }
 
 .recent-meta {
@@ -3501,7 +3502,8 @@ button {
 .uploaded-template-card .uploaded-template-preview {
   display: grid;
   width: min(100%, 190px);
-  height: 232px;
+  height: auto;
+  aspect-ratio: 0.82;
   flex: 0 0 auto;
   overflow: hidden;
   place-items: center;
@@ -3900,7 +3902,8 @@ button {
   }
 
   .recent-preview {
-    height: 190px;
+    height: auto;
+    aspect-ratio: 1.08;
   }
 
   .recent-meta {
@@ -4005,10 +4008,95 @@ button {
   }
 
   .recent-preview {
-    height: 250px;
+    height: auto;
+    aspect-ratio: 1.08;
+  }
+}
+
+.recent-grid:not(.list-view) {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 310px), 1fr));
+  gap: 20px;
+}
+
+.recent-grid:not(.list-view) .recent-preview {
+  height: auto;
+  aspect-ratio: 1.08;
+}
+
+.recent-grid:not(.list-view) .recent-card {
+  border-radius: 14px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.recent-grid:not(.list-view) .recent-card:hover,
+.recent-grid:not(.list-view) .recent-card:focus-within {
+  transform: translateY(-2px);
+  border-color: #cbd8e3;
+  box-shadow: 0 12px 28px rgba(38, 56, 77, 0.1);
+}
+
+.recent-grid:not(.list-view) .recent-meta {
+  min-height: 72px;
+  padding: 14px 16px;
+}
+
+.recent-grid:not(.list-view) .recent-title {
+  font-size: 13px;
+}
+
+.template-strip {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 205px), 1fr));
+  gap: 18px;
+}
+
+.template-card {
+  min-height: 318px;
+  padding: 18px 14px;
+}
+
+.uploaded-template-card {
+  min-height: 342px;
+}
+
+.uploaded-template-card .uploaded-template-preview,
+.upload-template-icon {
+  width: min(100%, 205px);
+  height: auto;
+  aspect-ratio: 0.82;
+}
+
+@media (max-width: 900px) {
+  .template-strip {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  }
+}
+
+@media (max-width: 600px) {
+  .recent-grid:not(.list-view) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .template-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .uploaded-template-card,
+  .template-card {
+    min-height: 0;
   }
 
   .template-actions > button:first-child {
     padding: 4px;
+  }
+}
+
+@media (max-width: 380px) {
+  .recent-grid:not(.list-view) {
+    grid-template-columns: 1fr;
   }
 }

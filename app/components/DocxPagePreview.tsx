@@ -9,10 +9,12 @@ export default function DocxPagePreview({
   src,
   className = "",
   fallbackKind = "minimal",
+  previewOnHover = false,
 }: {
   src: string;
   className?: string;
   fallbackKind?: string;
+  previewOnHover?: boolean;
 }) {
   const previewRef = useRef<HTMLSpanElement>(null);
   const [status, setStatus] = useState<PreviewStatus>("loading");
@@ -25,9 +27,65 @@ export default function DocxPagePreview({
 
     let cancelled = false;
     let resizeObserver: ResizeObserver | undefined;
+    let hoverDelay: number | undefined;
+    let pageRotation: number | undefined;
+    let previewPages: HTMLElement[] = [];
+    let activePageIndex = 0;
+    let previewRequested = false;
     const abortController = new AbortController();
     container.replaceChildren();
     setStatus("loading");
+
+    const showPage = (index: number) => {
+      previewPages.forEach((page, pageIndex) => {
+        page.style.display = pageIndex === index ? "block" : "none";
+      });
+      const page = previewPages[index];
+      if (page) {
+        page.animate(
+          [
+            { opacity: 0, transform: "translateX(12px)" },
+            { opacity: 1, transform: "translateX(0)" },
+          ],
+          { duration: 260, easing: "ease-out" },
+        );
+      }
+      activePageIndex = index;
+    };
+    const startPageRotation = () => {
+      if (
+        !previewOnHover ||
+        !previewRequested ||
+        previewPages.length < 2 ||
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        return;
+      }
+      if (pageRotation !== undefined) window.clearInterval(pageRotation);
+      pageRotation = window.setInterval(() => {
+        showPage((activePageIndex + 1) % previewPages.length);
+      }, 1500);
+    };
+    const requestPagePreview = () => {
+      previewRequested = true;
+      if (hoverDelay !== undefined) window.clearTimeout(hoverDelay);
+      hoverDelay = window.setTimeout(startPageRotation, 700);
+    };
+    const stopPagePreview = () => {
+      previewRequested = false;
+      if (hoverDelay !== undefined) window.clearTimeout(hoverDelay);
+      if (pageRotation !== undefined) window.clearInterval(pageRotation);
+      hoverDelay = undefined;
+      pageRotation = undefined;
+      if (previewPages.length) showPage(0);
+    };
+    const previewRoot = container.parentElement;
+    if (previewOnHover && previewRoot) {
+      previewRoot.addEventListener("mouseenter", requestPagePreview);
+      previewRoot.addEventListener("mouseleave", stopPagePreview);
+      previewRoot.addEventListener("focusin", requestPagePreview);
+      previewRoot.addEventListener("focusout", stopPagePreview);
+    }
 
     async function renderPreview(previewContainer: HTMLSpanElement) {
       try {
@@ -66,23 +124,28 @@ export default function DocxPagePreview({
         const wrapper = previewContainer.querySelector<HTMLElement>(
           `.${rendererClass}-wrapper`,
         );
-        const firstPage = wrapper?.querySelector<HTMLElement>(
-          `section.${rendererClass}`,
-        );
+        previewPages = wrapper
+          ? Array.from(
+              wrapper.querySelectorAll<HTMLElement>(`section.${rendererClass}`),
+            )
+          : [];
+        const firstPage = previewPages[0];
         if (!wrapper || !firstPage) {
           throw new Error("DOCX renderer did not produce a page preview.");
         }
 
-        wrapper.querySelectorAll(`section.${rendererClass}`).forEach((page) => {
-          if (page !== firstPage) page.remove();
+        previewPages.forEach((page, index) => {
+          page.style.position = index === 0 ? "relative" : "absolute";
+          page.style.top = "0";
+          page.style.left = "0";
+          page.style.margin = "0";
+          page.style.boxShadow = "none";
+          page.style.display = index === 0 ? "block" : "none";
         });
         wrapper.style.position = "absolute";
         wrapper.style.top = "0";
         wrapper.style.padding = "0";
         wrapper.style.background = "transparent";
-        firstPage.style.margin = "0";
-        firstPage.style.boxShadow = "none";
-
         const fitPreview = () => {
           const pageWidth = firstPage.offsetWidth;
           const pageHeight = firstPage.offsetHeight;
@@ -100,6 +163,7 @@ export default function DocxPagePreview({
         resizeObserver = new ResizeObserver(fitPreview);
         resizeObserver.observe(previewContainer);
         setStatus("ready");
+        if (previewRequested) requestPagePreview();
       } catch (error) {
         if (cancelled || abortController.signal.aborted) return;
         console.error("Unable to render a DOCX history preview", error);
@@ -134,9 +198,14 @@ export default function DocxPagePreview({
       abortController.abort();
       intersectionObserver?.disconnect();
       resizeObserver?.disconnect();
+      stopPagePreview();
+      previewRoot?.removeEventListener("mouseenter", requestPagePreview);
+      previewRoot?.removeEventListener("mouseleave", stopPagePreview);
+      previewRoot?.removeEventListener("focusin", requestPagePreview);
+      previewRoot?.removeEventListener("focusout", stopPagePreview);
       container.replaceChildren();
     };
-  }, [rendererClass, src]);
+  }, [previewOnHover, rendererClass, src]);
 
   return (
     <span

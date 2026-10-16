@@ -23,6 +23,7 @@ export default function TemplateThumbnail({
         src={`/api/templates/${encodeURIComponent(templateId)}/preview`}
         className={`uploaded-template-preview ${className}`.trim()}
         fallbackKind={fallbackKind}
+        previewOnHover
       />
     );
   }

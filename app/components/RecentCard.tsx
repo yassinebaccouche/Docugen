@@ -49,6 +49,7 @@ export default function RecentCard({
             src={item.url}
             className="recent-docx-preview"
             fallbackKind={documentPreviewKind(item.title, item.fileName, item.kind)}
+            previewOnHover
           />
         ) : isSvgThumbnail(item.thumbnailUrl) ? (
           <DocumentPage

@@ -70,9 +70,10 @@ does not contain a server credential.
 
 For Google sign-in on a hosted website, enable the Google provider in Firebase
 Authentication and add the website hostname under **Authentication → Settings
-→ Authorized domains**. Add the production hostname (and any preview hostname
-you test). An `auth/unauthorized-domain` error means the current hostname is
-not on that list; `auth/operation-not-allowed` means Google sign-in is disabled.
+→ Authorized domains**. Add `docugen-alpha.vercel.app` (and any preview
+hostname you test). An `auth/unauthorized-domain` error means the current
+hostname is not on that list; `auth/operation-not-allowed` means Google sign-in
+is disabled.
 
 After signup, the app creates a Firestore document at `users/{uid}` with the
 user's `id`/`uid`, `email`, and `name`/`nom` fields, along with profile
@@ -83,10 +84,15 @@ its Firestore profile is not, verify that the deployed Firestore rules match
 configured Firebase project.
 
 Uploaded DOCX templates are stored in Cloudinary as raw assets and kept on a
-local working copy for the editor and ONLYOFFICE. The Cloudinary cloud name
-and unsigned upload preset are configured in `app/lib/cloudinary.ts`; the
-current defaults are `yal4swpi` and `ml_default`. Edited templates are uploaded
-as new Cloudinary versions so the preset can keep overwrite disabled. Each
+local working copy for local development. On Vercel, the DOCX binary remains in
+Cloudinary and its template metadata is stored in a private Vercel Blob store,
+because Vercel function filesystems are read-only and ephemeral. Create a Blob
+store in the Vercel project and connect it to the deployment so Vercel sets
+`BLOB_READ_WRITE_TOKEN`; without it, template operations fail with a clear
+configuration error instead of trying to write under `/var/task`. The
+Cloudinary cloud name and unsigned upload preset are configured in
+`app/lib/cloudinary.ts`; the current defaults are `yal4swpi` and `ml_default`.
+Edited templates are uploaded as new Cloudinary versions so the preset can keep overwrite disabled. Each
 signed-in user's Firestore document record contains the Cloudinary URL and
 `storageProvider: "cloudinary"`. Generated DOCX files and ZIP archives are
 also uploaded to Cloudinary and saved in Firestore for signed-in users; for
@@ -104,10 +110,25 @@ Open a folder in **Dossiers de génération** to select files for download or
 download the complete folder as a ZIP named after the folder. Folder ZIP
 downloads are assembled on the server to avoid browser-side packaging failures;
 they support up to 200 files and 250 MB per archive.
-Configure Cloudinary to allow unsigned raw
-uploads for this preset before importing documents. Local working copies and
-metadata are kept in `.docugen-data/` by default; set `DOCUGEN_DATA_DIR` to use
-a different directory or mounted persistent disk.
+Configure Cloudinary to allow unsigned raw uploads for this preset before
+importing documents. In local development, working copies and metadata are
+kept in `.docugen-data/` by default; set `DOCUGEN_DATA_DIR` to use a different
+directory or mounted persistent disk. On Vercel, metadata uses the connected
+Blob store and current DOCX files are fetched from Cloudinary.
+
+### Vercel setup and troubleshooting
+
+In the Vercel project, create a Blob store under **Storage**, connect it to this
+project, and redeploy so `BLOB_READ_WRITE_TOKEN` is available to the function.
+The Firebase warning is separate: add `docugen-alpha.vercel.app` to
+**Firebase Console → Authentication → Settings → Authorized domains**.
+
+If an import fails specifically with `mkdir '/var/task/.docugen-data'`, the
+Cloudinary upload step ran before the failing local-filesystem write. The
+uploaded asset may therefore already be in Cloudinary, but without saved
+template metadata the app cannot list or open it. Connect Blob storage, then
+import that document again. A Cloudinary upload/configuration failure is
+reported before the local metadata-storage step.
 
 The built-in DOCX gallery is loaded from `app/Docx`; add or remove `.docx`
 files in that folder to update the bundled template cards. Clicking a bundled

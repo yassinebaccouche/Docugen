@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { get, list, put } from "@vercel/blob";
 import {
   mkdir,
   readFile,
@@ -40,6 +41,19 @@ export interface OnlyOfficeEditorConfig {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_SIZE = 10 * 1024 * 1024;
+const BLOB_METADATA_PREFIX = "docugen/templates/";
+const DOCX_CONTENT_TYPE =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+function usesBlobStorage(): boolean {
+  if (process.env.BLOB_READ_WRITE_TOKEN) return true;
+  if (process.env.VERCEL === "1") {
+    throw new Error(
+      "Template storage is not configured. Connect a Vercel Blob store and add its BLOB_READ_WRITE_TOKEN to this deployment.",
+    );
+  }
+  return false;
+}
 
 function storeDirectory(): string {
   // Keep template data local by default; deployments can point this at a persistent disk.
@@ -68,35 +82,20 @@ function metadataPath(id: string): string {
 }
 
 async function readMetadata(id: string): Promise<StoredTemplate | null> {
+  if (usesBlobStorage()) {
+    const result = await get(`${BLOB_METADATA_PREFIX}${id}.json`, {
+      access: "private",
+    });
+    if (!result) return null;
+    if (result.statusCode !== 200) {
+      throw new Error(`Unable to read metadata for template "${id}".`);
+    }
+    return parseMetadata(await new Response(result.stream).text(), id);
+  }
+
   try {
     const json = await readFile(metadataPath(id), "utf8");
-    const value: unknown = JSON.parse(json);
-    if (
-      value &&
-      typeof value === "object" &&
-      "id" in value &&
-      value.id === id &&
-      "name" in value &&
-      typeof value.name === "string" &&
-      "createdAt" in value &&
-      typeof value.createdAt === "string" &&
-      "updatedAt" in value &&
-      typeof value.updatedAt === "string" &&
-      "saveVersion" in value &&
-      typeof value.saveVersion === "number" &&
-      (!("thumbnailUrl" in value) ||
-        typeof value.thumbnailUrl === "string") &&
-      (!("cloudinary" in value) ||
-        (typeof value.cloudinary === "object" &&
-          value.cloudinary !== null &&
-          "publicId" in value.cloudinary &&
-          typeof value.cloudinary.publicId === "string" &&
-          "url" in value.cloudinary &&
-          typeof value.cloudinary.url === "string"))
-    ) {
-      return value as StoredTemplate;
-    }
-    throw new Error("Invalid stored template metadata.");
+    return parseMetadata(json, id);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
@@ -105,9 +104,57 @@ async function readMetadata(id: string): Promise<StoredTemplate | null> {
   }
 }
 
-/** Stores a validated DOCX and its metadata in the configured local data directory. */
+function parseMetadata(json: string, id: string): StoredTemplate {
+  const value: unknown = JSON.parse(json);
+  if (
+    value &&
+    typeof value === "object" &&
+    "id" in value &&
+    value.id === id &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "createdAt" in value &&
+    typeof value.createdAt === "string" &&
+    "updatedAt" in value &&
+    typeof value.updatedAt === "string" &&
+    "saveVersion" in value &&
+    typeof value.saveVersion === "number" &&
+    (!("thumbnailUrl" in value) || typeof value.thumbnailUrl === "string") &&
+    (!("cloudinary" in value) ||
+      (typeof value.cloudinary === "object" &&
+        value.cloudinary !== null &&
+        "publicId" in value.cloudinary &&
+        typeof value.cloudinary.publicId === "string" &&
+        "url" in value.cloudinary &&
+        typeof value.cloudinary.url === "string"))
+  ) {
+    return value as StoredTemplate;
+  }
+  throw new Error("Invalid stored template metadata.");
+}
+
+async function writeMetadata(metadata: StoredTemplate): Promise<void> {
+  if (usesBlobStorage()) {
+    await put(
+      `${BLOB_METADATA_PREFIX}${metadata.id}.json`,
+      JSON.stringify(metadata),
+      {
+        access: "private",
+        allowOverwrite: true,
+        contentType: "application/json",
+      },
+    );
+    return;
+  }
+
+  await mkdir(storeDirectory(), { recursive: true });
+  await writeFile(metadataPath(metadata.id), JSON.stringify(metadata));
+}
+
+/** Stores a validated DOCX in Cloudinary and metadata in persistent storage. */
 export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> {
   validateTemplateFile(file);
+  const useBlobStorage = usesBlobStorage();
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length > MAX_TEMPLATE_SIZE) {
     throw new Error("The DOCX template exceeds the 10 MB limit.");
@@ -126,7 +173,7 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
     new Uint8Array(bytes),
     metadata.name,
     cloudinaryRawPublicId("templates", id, metadata.name),
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    DOCX_CONTENT_TYPE,
   );
   metadata.cloudinary = cloudinary;
   const thumbnail = getDocxThumbnail(bytes);
@@ -140,22 +187,55 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
     metadata.thumbnailUrl = thumbnailAsset.url;
   }
 
-  await mkdir(storeDirectory(), { recursive: true });
-  try {
-    await writeFile(templatePath(id), bytes, { flag: "wx" });
-    await writeFile(metadataPath(id), JSON.stringify(metadata), { flag: "wx" });
-  } catch (error) {
-    await Promise.all([
-      unlink(templatePath(id)).catch(() => undefined),
-      unlink(metadataPath(id)).catch(() => undefined),
-    ]);
-    throw error;
+  if (useBlobStorage) {
+    await writeMetadata(metadata);
+  } else {
+    await mkdir(storeDirectory(), { recursive: true });
+    try {
+      await writeFile(templatePath(id), bytes, { flag: "wx" });
+      await writeFile(metadataPath(id), JSON.stringify(metadata), { flag: "wx" });
+    } catch (error) {
+      await Promise.all([
+        unlink(templatePath(id)).catch(() => undefined),
+        unlink(metadataPath(id)).catch(() => undefined),
+      ]);
+      throw error;
+    }
   }
   return metadata;
 }
 
-/** Lists local templates newest first; missing storage means an empty first-run store. */
+/** Lists templates newest first; an empty storage directory is a first-run store. */
 export async function listStoredTemplates(): Promise<StoredTemplate[]> {
+  if (usesBlobStorage()) {
+    const records: StoredTemplate[] = [];
+    let cursor: string | undefined;
+    do {
+      const result = await list({
+        prefix: BLOB_METADATA_PREFIX,
+        ...(cursor ? { cursor } : {}),
+      });
+      const pageRecords = await Promise.all(
+        result.blobs
+          .map((blob) => blob.pathname.slice(BLOB_METADATA_PREFIX.length))
+          .filter((name) => /^[0-9a-f-]+\.json$/i.test(name))
+          .map((name) => readMetadata(name.slice(0, -5))),
+      );
+      records.push(
+        ...pageRecords.filter(
+          (record): record is StoredTemplate => record !== null,
+        ),
+      );
+      if (result.hasMore && !result.cursor) {
+        throw new Error("Vercel Blob did not return a template-list cursor.");
+      }
+      cursor = result.hasMore ? result.cursor : undefined;
+    } while (cursor);
+
+    return records
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  }
+
   let files: string[];
   try {
     files = await readdir(/*turbopackIgnore: true*/ storeDirectory());
@@ -183,6 +263,18 @@ export async function getStoredTemplate(id: string): Promise<StoredTemplate | nu
 
 export async function readStoredTemplateFile(id: string): Promise<Buffer | null> {
   if (!isTemplateId(id)) return null;
+  if (usesBlobStorage()) {
+    const metadata = await readMetadata(id);
+    if (!metadata?.cloudinary?.url) return null;
+    const response = await fetch(metadata.cloudinary.url, { cache: "no-store" });
+    if (!response.ok) {
+      throw new Error(
+        `Unable to download template "${id}" from Cloudinary (${response.status}).`,
+      );
+    }
+    return Buffer.from(await response.arrayBuffer());
+  }
+
   try {
     return await readFile(templatePath(id));
   } catch (error) {
@@ -221,7 +313,7 @@ export async function saveEditedTemplate(
       `${id}-v${nextMetadata.saveVersion}`,
       metadata.name,
     ),
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    DOCX_CONTENT_TYPE,
   );
   const thumbnail = getDocxThumbnail(bytes);
   if (thumbnail) {
@@ -233,16 +325,20 @@ export async function saveEditedTemplate(
     );
     nextMetadata.thumbnailUrl = thumbnailAsset.url;
   }
-  const temporaryFile = `${templatePath(id)}.${randomUUID()}.tmp`;
+  if (usesBlobStorage()) {
+    await writeMetadata(nextMetadata);
+  } else {
+    const temporaryFile = `${templatePath(id)}.${randomUUID()}.tmp`;
 
-  await writeFile(temporaryFile, bytes, { flag: "wx" });
-  try {
-    await rename(temporaryFile, templatePath(id));
-  } catch (error) {
-    await unlink(temporaryFile).catch(() => undefined);
-    throw error;
+    await writeFile(temporaryFile, bytes, { flag: "wx" });
+    try {
+      await rename(temporaryFile, templatePath(id));
+    } catch (error) {
+      await unlink(temporaryFile).catch(() => undefined);
+      throw error;
+    }
+    await writeFile(metadataPath(id), JSON.stringify(nextMetadata));
   }
-  await writeFile(metadataPath(id), JSON.stringify(nextMetadata));
   return nextMetadata;
 }
 
