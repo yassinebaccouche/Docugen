@@ -1,11 +1,15 @@
 import { readBundledDocxTemplate } from "@/app/lib/bundled-docx-templates";
-import { saveUploadedTemplate } from "@/app/lib/template-store";
+import {
+  getTemplateAccess,
+  saveUploadedTemplate,
+} from "@/app/lib/template-store";
 
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const access = getTemplateAccess(request);
   const bundledTemplate = await readBundledDocxTemplate(id);
   if (!bundledTemplate) {
     return Response.json({ error: "Ce modèle DOCX n’existe plus." }, { status: 404 });
@@ -19,7 +23,7 @@ export async function POST(
         type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       },
     );
-    const template = await saveUploadedTemplate(file);
+    const template = await saveUploadedTemplate(file, access);
     return Response.json({ template }, { status: 201 });
   } catch (error) {
     console.error("Unable to add a bundled DOCX template to the document library", error);

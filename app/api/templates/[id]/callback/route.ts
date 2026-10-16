@@ -1,4 +1,4 @@
-import { saveEditedTemplate } from "@/app/lib/template-store";
+import { getTemplateAccess, saveEditedTemplate } from "@/app/lib/template-store";
 import { verifyOnlyOfficeSignature } from "@/app/lib/onlyoffice";
 
 interface EditorCallback {
@@ -27,6 +27,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const access = getTemplateAccess(request);
   let body: unknown;
   try {
     body = await request.json();
@@ -55,7 +56,7 @@ export async function POST(
     }
 
     try {
-      await saveEditedTemplate(id, Buffer.from(await response.arrayBuffer()));
+      await saveEditedTemplate(id, Buffer.from(await response.arrayBuffer()), access);
     } catch (error) {
       console.error("Unable to save the edited Word template", error);
       return Response.json({ error: 1 });

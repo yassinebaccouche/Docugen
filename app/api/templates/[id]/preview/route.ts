@@ -1,17 +1,22 @@
 import { readBundledDocxTemplate } from "@/app/lib/bundled-docx-templates";
-import { getStoredTemplate, readStoredTemplateFile } from "@/app/lib/template-store";
+import {
+  getTemplateAccess,
+  getStoredTemplate,
+  readStoredTemplateFile,
+} from "@/app/lib/template-store";
 
 const DOCX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const access = getTemplateAccess(request);
   const [template, storedFile] = await Promise.all([
-    getStoredTemplate(id),
-    readStoredTemplateFile(id),
+    getStoredTemplate(id, access),
+    readStoredTemplateFile(id, access),
   ]);
   const bundledTemplate = storedFile
     ? null

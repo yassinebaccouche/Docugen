@@ -1,16 +1,18 @@
 import {
+  getTemplateAccess,
   getStoredTemplate,
   readStoredTemplateFile,
 } from "@/app/lib/template-store";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const access = getTemplateAccess(request);
   const [template, file] = await Promise.all([
-    getStoredTemplate(id),
-    readStoredTemplateFile(id),
+    getStoredTemplate(id, access),
+    readStoredTemplateFile(id, access),
   ]);
   if (!template || !file) {
     return Response.json({ error: "Ce modèle n’existe plus." }, { status: 404 });

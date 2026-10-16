@@ -8,6 +8,7 @@ import {
 } from "@/app/lib/docx-template";
 import { readSpreadsheetRows } from "@/app/lib/spreadsheet";
 import {
+  getTemplateAccess,
   getStoredTemplate,
   readStoredTemplateFile,
 } from "@/app/lib/template-store";
@@ -22,6 +23,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
 }
 
 export async function POST(request: Request) {
+  const access = getTemplateAccess(request);
   const formData = await request.formData();
   const file = formData.get("file");
   const templateId = formData.get("templateId");
@@ -53,8 +55,8 @@ export async function POST(request: Request) {
       templateName = bundledTemplate.name;
     } else {
       const [template, storedFile] = await Promise.all([
-        getStoredTemplate(templateId),
-        readStoredTemplateFile(templateId),
+        getStoredTemplate(templateId, access),
+        readStoredTemplateFile(templateId, access),
       ]);
       if (!template || !storedFile) {
         return Response.json(

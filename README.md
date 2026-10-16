@@ -84,15 +84,12 @@ its Firestore profile is not, verify that the deployed Firestore rules match
 configured Firebase project.
 
 Uploaded DOCX templates are stored in Cloudinary as raw assets and kept on a
-local working copy for local development. On Vercel, the DOCX binary remains in
-Cloudinary and its template metadata is stored in the existing Firebase
-Firestore project using a server-only Firebase Admin credential, because Vercel
-function filesystems are read-only and ephemeral. Configure
-`FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel with a dedicated service account key
-that has the **Cloud Datastore User** role. The Admin SDK writes only to the
-`docugenTemplates` collection; client Firestore rules deny access to that
-collection. Never expose or commit this credential. The Cloudinary cloud name
-and unsigned upload preset are configured in
+local working copy for local development. On Vercel, signed-in users' template
+metadata is stored in the existing Firebase Firestore project using their
+Firebase Authentication session, inside each user's existing Firestore profile
+document. No service account key or additional Firestore rule is needed.
+Signed-out users' template metadata is kept only in their browser. The
+Cloudinary cloud name and unsigned upload preset are configured in
 `app/lib/cloudinary.ts`; the current defaults are `yal4swpi` and `ml_default`.
 Edited templates are uploaded as new Cloudinary versions so the preset can keep overwrite disabled. Each
 signed-in user's Firestore document record contains the Cloudinary URL and
@@ -120,21 +117,19 @@ current DOCX files are fetched from Cloudinary.
 
 ### Vercel setup and troubleshooting
 
-Create a dedicated service account in Google Cloud IAM for the Firebase
-project, grant it **Cloud Datastore User**, and create a JSON key. Add the
-complete JSON key as the `FIREBASE_SERVICE_ACCOUNT_JSON` environment variable
-in Vercel for Production and redeploy. Do not paste the key into source control
-or chat. The Firebase sign-in warning is separate: add
+No Firebase service-account secret or additional Firestore rules are required
+on Vercel. Signed-in users save their metadata in their existing Firestore
+profile; signed-out users keep it only in their browser. Add
 `docugen-alpha.vercel.app` to **Firebase Console → Authentication → Settings
-→ Authorized domains**.
+→ Authorized domains** so Google sign-in works on the deployed site.
 
 If an import fails specifically with `mkdir '/var/task/.docugen-data'`, that
 was an older deployment attempting to write metadata to Vercel's
-read-only filesystem. The Cloudinary upload happens before metadata storage,
-so that failed import may already have left a DOCX asset in Cloudinary without
-a Firestore record. After setting `FIREBASE_SERVICE_ACCOUNT_JSON`, redeploy and
-import that document again. Current Cloudinary upload failures return the
-Cloudinary error; Firestore metadata failures are reported separately.
+read-only filesystem. This was an older deployment attempting to save metadata
+on Vercel's ephemeral disk. Deploy the current code. Signed-in template
+metadata is stored in Firestore; signed-out metadata is kept in the browser.
+Cloudinary upload failures and Firestore metadata failures are reported
+separately.
 
 The built-in DOCX gallery is loaded from `app/Docx`; add or remove `.docx`
 files in that folder to update the bundled template cards. Clicking a bundled

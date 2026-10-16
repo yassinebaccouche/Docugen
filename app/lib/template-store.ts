@@ -9,6 +9,7 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
+  CLOUDINARY_CLOUD_NAME,
   cloudinaryRawPublicId,
   uploadDocumentThumbnailToCloudinary,
   uploadRawFileToCloudinary,
@@ -16,7 +17,11 @@ import {
 } from "./cloudinary";
 import { getDocxThumbnail } from "./docx-thumbnail";
 import { validateTemplateFile } from "./docx-template";
-import { getTemplateMetadataFirestore } from "./firebase-admin";
+import {
+  getFirestoreTemplate,
+  listFirestoreTemplates,
+  writeFirestoreTemplate,
+} from "./firebase-firestore-rest";
 import {
   getDocumentServerPublicAppUrl,
   getEditorServerUrl,
@@ -29,8 +34,15 @@ export interface StoredTemplate {
   createdAt: string;
   updatedAt: string;
   saveVersion: number;
+  ownerId?: string;
   cloudinary?: CloudinaryAsset;
   thumbnailUrl?: string;
+}
+
+export interface TemplateAccess {
+  idToken?: string;
+  ownerId?: string;
+  localTemplate?: StoredTemplate;
 }
 
 export interface OnlyOfficeEditorConfig {
@@ -41,12 +53,55 @@ export interface OnlyOfficeEditorConfig {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_SIZE = 10 * 1024 * 1024;
-const TEMPLATE_COLLECTION = "docugenTemplates";
 const DOCX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 function usesFirestoreMetadata(): boolean {
-  return process.env.VERCEL === "1" || Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
+  return process.env.VERCEL === "1";
+}
+
+function tokenOwnerId(idToken: string): string {
+  const payload = idToken.split(".")[1];
+  if (!payload) throw new Error("Firebase sign-in is required to save templates.");
+  let claims: unknown;
+  try {
+    claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+  } catch {
+    throw new Error("The Firebase sign-in token is invalid.");
+  }
+  if (
+    !claims ||
+    typeof claims !== "object" ||
+    !("sub" in claims) ||
+    typeof claims.sub !== "string" ||
+    !claims.sub
+  ) {
+    throw new Error("Firebase sign-in is required to save templates.");
+  }
+  return claims.sub;
+}
+
+export function getTemplateAccess(request: Request): TemplateAccess {
+  const authorization = request.headers.get("authorization") ?? "";
+  const idToken = authorization.match(/^Bearer\s+(.+)$/i)?.[1];
+  const rawLocalTemplate = request.headers.get("x-docugen-template");
+  let localTemplate: StoredTemplate | undefined;
+  if (rawLocalTemplate) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawLocalTemplate);
+    } catch {
+      throw new Error("The local template metadata is invalid.");
+    }
+    if (!parsed || typeof parsed !== "object" || !("id" in parsed) || typeof parsed.id !== "string") {
+      throw new Error("The local template metadata is invalid.");
+    }
+    localTemplate = parseMetadata(JSON.stringify(parsed), parsed.id);
+  }
+  return {
+    ...(idToken ? { idToken, ownerId: tokenOwnerId(idToken) } : {}),
+    ...(localTemplate ? { localTemplate } : {}),
+  };
 }
 
 function storeDirectory(): string {
@@ -59,6 +114,22 @@ function storeDirectory(): string {
 
 function isTemplateId(id: string): boolean {
   return UUID_PATTERN.test(id);
+}
+
+function isCloudinaryAssetUrl(value: string, resourceType: "raw" | "image"): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      url.hostname === "res.cloudinary.com" &&
+      url.port === "" &&
+      url.username === "" &&
+      url.password === "" &&
+      url.pathname.startsWith(`/${CLOUDINARY_CLOUD_NAME}/${resourceType}/upload/`)
+    );
+  } catch {
+    return false;
+  }
 }
 
 function templatePath(id: string): string {
@@ -75,15 +146,20 @@ function metadataPath(id: string): string {
   return path.join(storeDirectory(), `${id}.json`);
 }
 
-async function readMetadata(id: string): Promise<StoredTemplate | null> {
+async function readMetadata(
+  id: string,
+  access: TemplateAccess = {},
+): Promise<StoredTemplate | null> {
   if (usesFirestoreMetadata()) {
-    const snapshot = await getTemplateMetadataFirestore()
-      .collection(TEMPLATE_COLLECTION)
-      .doc(id)
-      .get();
-    return snapshot.exists
-      ? parseMetadata(JSON.stringify(snapshot.data()), id)
-      : null;
+    if (access.idToken) {
+      const value = access.ownerId
+        ? await getFirestoreTemplate(access.ownerId, id, access.idToken)
+        : null;
+      if (value) return parseMetadata(JSON.stringify(value), id);
+      return access.localTemplate?.id === id ? access.localTemplate : null;
+    }
+    if (access.localTemplate?.id === id) return access.localTemplate;
+    return null;
   }
 
   try {
@@ -112,26 +188,38 @@ function parseMetadata(json: string, id: string): StoredTemplate {
     typeof value.updatedAt === "string" &&
     "saveVersion" in value &&
     typeof value.saveVersion === "number" &&
-    (!("thumbnailUrl" in value) || typeof value.thumbnailUrl === "string") &&
+    (!("ownerId" in value) || typeof value.ownerId === "string") &&
+    (!("thumbnailUrl" in value) ||
+      (typeof value.thumbnailUrl === "string" &&
+        isCloudinaryAssetUrl(value.thumbnailUrl, "image"))) &&
     (!("cloudinary" in value) ||
       (typeof value.cloudinary === "object" &&
         value.cloudinary !== null &&
         "publicId" in value.cloudinary &&
         typeof value.cloudinary.publicId === "string" &&
         "url" in value.cloudinary &&
-        typeof value.cloudinary.url === "string"))
+        typeof value.cloudinary.url === "string" &&
+        isCloudinaryAssetUrl(value.cloudinary.url, "raw")))
   ) {
     return value as StoredTemplate;
   }
   throw new Error("Invalid stored template metadata.");
 }
 
-async function writeMetadata(metadata: StoredTemplate): Promise<void> {
+async function writeMetadata(
+  metadata: StoredTemplate,
+  access: TemplateAccess = {},
+): Promise<void> {
   if (usesFirestoreMetadata()) {
-    await getTemplateMetadataFirestore()
-      .collection(TEMPLATE_COLLECTION)
-      .doc(metadata.id)
-      .set(metadata);
+    if (access.idToken) {
+      const ownerId = access.ownerId ?? tokenOwnerId(access.idToken);
+      await writeFirestoreTemplate(
+        ownerId,
+        metadata.id,
+        { ...metadata, ownerId },
+        access.idToken,
+      );
+    }
     return;
   }
 
@@ -140,10 +228,12 @@ async function writeMetadata(metadata: StoredTemplate): Promise<void> {
 }
 
 /** Stores a validated DOCX in Cloudinary and metadata in persistent storage. */
-export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> {
+export async function saveUploadedTemplate(
+  file: File,
+  access: TemplateAccess = {},
+): Promise<StoredTemplate> {
   validateTemplateFile(file);
   const useFirestore = usesFirestoreMetadata();
-  if (useFirestore) getTemplateMetadataFirestore();
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length > MAX_TEMPLATE_SIZE) {
     throw new Error("The DOCX template exceeds the 10 MB limit.");
@@ -157,6 +247,7 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
     createdAt: now,
     updatedAt: now,
     saveVersion: 0,
+    ...(access.ownerId ? { ownerId: access.ownerId } : {}),
   };
   const cloudinary = await uploadRawFileToCloudinary(
     new Uint8Array(bytes),
@@ -177,13 +268,15 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
   }
 
   if (useFirestore) {
-    try {
-      await writeMetadata(metadata);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "Firestore write failed.";
-      throw new Error(
-        `Le fichier a été téléversé sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
-      );
+    if (access.idToken) {
+      try {
+        await writeMetadata(metadata, access);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Firestore write failed.";
+        throw new Error(
+          `Le fichier a été téléversé sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
+        );
+      }
     }
   } else {
     await mkdir(storeDirectory(), { recursive: true });
@@ -202,15 +295,13 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
 }
 
 /** Lists templates newest first; an empty storage directory is a first-run store. */
-export async function listStoredTemplates(): Promise<StoredTemplate[]> {
+export async function listStoredTemplates(
+  access: TemplateAccess = {},
+): Promise<StoredTemplate[]> {
   if (usesFirestoreMetadata()) {
-    const snapshot = await getTemplateMetadataFirestore()
-      .collection(TEMPLATE_COLLECTION)
-      .get();
-    return snapshot.docs
-      .map((document) =>
-        parseMetadata(JSON.stringify(document.data()), document.id),
-      )
+    if (!access.idToken || !access.ownerId) return [];
+    return (await listFirestoreTemplates(access.idToken, access.ownerId))
+      .map((value) => parseMetadata(JSON.stringify(value), String(value.id ?? "")))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -234,15 +325,21 @@ export async function listStoredTemplates(): Promise<StoredTemplate[]> {
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
 }
 
-export async function getStoredTemplate(id: string): Promise<StoredTemplate | null> {
+export async function getStoredTemplate(
+  id: string,
+  access: TemplateAccess = {},
+): Promise<StoredTemplate | null> {
   if (!isTemplateId(id)) return null;
-  return readMetadata(id);
+  return readMetadata(id, access);
 }
 
-export async function readStoredTemplateFile(id: string): Promise<Buffer | null> {
+export async function readStoredTemplateFile(
+  id: string,
+  access: TemplateAccess = {},
+): Promise<Buffer | null> {
   if (!isTemplateId(id)) return null;
   if (usesFirestoreMetadata()) {
-    const metadata = await readMetadata(id);
+    const metadata = await readMetadata(id, access);
     if (!metadata?.cloudinary?.url) return null;
     const response = await fetch(metadata.cloudinary.url, { cache: "no-store" });
     if (!response.ok) {
@@ -267,6 +364,7 @@ export async function readStoredTemplateFile(id: string): Promise<Buffer | null>
 export async function saveEditedTemplate(
   id: string,
   bytes: Buffer,
+  access: TemplateAccess = {},
 ): Promise<StoredTemplate> {
   if (!isTemplateId(id)) {
     throw new Error("Invalid template identifier.");
@@ -275,7 +373,7 @@ export async function saveEditedTemplate(
     throw new Error("The updated DOCX template is empty or exceeds the 10 MB limit.");
   }
 
-  const metadata = await readMetadata(id);
+  const metadata = await readMetadata(id, access);
   if (!metadata) throw new Error("The template no longer exists.");
 
   const nextMetadata: StoredTemplate = {
@@ -304,13 +402,15 @@ export async function saveEditedTemplate(
     nextMetadata.thumbnailUrl = thumbnailAsset.url;
   }
   if (usesFirestoreMetadata()) {
-    try {
-      await writeMetadata(nextMetadata);
-    } catch (error) {
-      const reason = error instanceof Error ? error.message : "Firestore write failed.";
-      throw new Error(
-        `La nouvelle version a été téléversée sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
-      );
+    if (access.idToken) {
+      try {
+        await writeMetadata(nextMetadata, access);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "Firestore write failed.";
+        throw new Error(
+          `La nouvelle version a été téléversée sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
+        );
+      }
     }
   } else {
     const temporaryFile = `${templatePath(id)}.${randomUUID()}.tmp`;

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import DocumentPage from "./DocumentPage";
+import { templateApiFetch } from "@/app/lib/template-api-client";
 
 type PreviewStatus = "loading" | "ready" | "error";
 
@@ -100,12 +101,21 @@ export default function DocxPagePreview({
         if (!isCloudinaryRawFile && !isSameOriginTemplatePreview) {
           throw new Error("Le document DOCX n’est pas enregistré comme fichier Raw Cloudinary.");
         }
-        const response = await fetch(sourceUrl, {
-          signal: abortController.signal,
-          ...(isSameOriginTemplatePreview
-            ? {}
-            : { mode: "cors" as const, credentials: "omit" as const }),
-        });
+        const previewMatch = sourceUrl.pathname.match(
+          /^\/api\/templates\/([^/]+)\/preview$/,
+        );
+        const response =
+          isSameOriginTemplatePreview && previewMatch
+            ? await templateApiFetch(
+                sourceUrl,
+                { signal: abortController.signal },
+                decodeURIComponent(previewMatch[1]),
+              )
+            : await fetch(sourceUrl, {
+                signal: abortController.signal,
+                mode: "cors",
+                credentials: "omit",
+              });
         if (!response.ok) {
           throw new Error(`DOCX preview request failed (${response.status}).`);
         }

@@ -21,6 +21,7 @@ import RecentCard from "../components/RecentCard";
 import TemplateThumbnail from "../components/TemplateThumbnail";
 import type { TemplateItem } from "../data/documents";
 import { auth } from "../Firebase/Config";
+import { templateApiFetch } from "../lib/template-api-client";
 import {
   deleteUserDocuments,
   listUserDocuments,
@@ -72,6 +73,10 @@ import {
 } from "../lib/recent-documents";
 import type { RecentDocument } from "../lib/recent-documents";
 import type { StoredTemplate } from "../lib/template-store";
+import {
+  listLocalTemplates,
+  saveLocalTemplate,
+} from "../lib/local-template-store";
 
 interface SignedInUser {
   uid: string;
@@ -320,25 +325,6 @@ export default function Homepage() {
 
   useEffect(() => {
     let active = true;
-    void fetch("/api/templates", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Impossible de charger vos modèles.");
-        return (await response.json()) as { templates: StoredTemplate[] };
-      })
-      .then((result) => {
-        if (active) setUploadedTemplates(result.templates);
-      })
-      .catch(() => {
-        if (active) setToast("Impossible de charger vos modèles enregistrés.");
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let active = true;
     void fetch("/api/docx-templates", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Impossible de charger les modèles DOCX.");
@@ -371,6 +357,16 @@ export default function Homepage() {
       setSelectedTemplateIds([]);
       if (!firebaseUser) {
         setUser(null);
+        try {
+          setUploadedTemplates(listLocalTemplates());
+        } catch (error) {
+          setUploadedTemplates([]);
+          setToast(
+            error instanceof Error
+              ? error.message
+              : "Impossible de charger les modèles enregistrés dans ce navigateur.",
+          );
+        }
         setProfileOpen(false);
         setSharedItems([]);
         setGenerationFolders([]);
@@ -412,6 +408,40 @@ export default function Homepage() {
             email: profile.email,
             photoURL: profile.profilePic || firebaseUser.photoURL || "",
           });
+
+          try {
+            const templatesResponse = await templateApiFetch("/api/templates", {
+              cache: "no-store",
+            });
+            const templatesResult = (await templatesResponse.json()) as {
+              templates?: StoredTemplate[];
+              error?: string;
+            };
+            if (!templatesResponse.ok) {
+              throw new Error(
+                templatesResult.error ?? "Impossible de charger les modèles enregistrés.",
+              );
+            }
+            const savedTemplates = templatesResult.templates ?? [];
+            const localTemplates = listLocalTemplates();
+            if (active && currentVersion === authChangeVersion) {
+              setUploadedTemplates([
+                ...localTemplates,
+                ...savedTemplates.filter(
+                  (template) => !localTemplates.some((local) => local.id === template.id),
+                ),
+              ]);
+            }
+          } catch (error) {
+            if (active && currentVersion === authChangeVersion) {
+              setUploadedTemplates(listLocalTemplates());
+              setToast(
+                error instanceof Error
+                  ? `Impossible de charger les modèles Firestore : ${error.message}`
+                  : "Impossible de charger les modèles Firestore.",
+              );
+            }
+          }
 
           const userDocuments = await listUserDocuments(firebaseUser.uid);
           if (active && currentVersion === authChangeVersion) {
@@ -580,7 +610,10 @@ export default function Homepage() {
           if (!downloadUrl) {
             throw new Error(`Aucun lien disponible pour « ${item.title} ».`);
           }
-          const response = await fetch(downloadUrl);
+          const response =
+            item.templateId && downloadUrl.includes("/api/templates/")
+              ? await templateApiFetch(downloadUrl, {}, item.templateId)
+              : await fetch(downloadUrl);
           if (!response.ok) {
             throw new Error(
               `Impossible de télécharger « ${item.title} » (${response.status}).`,
@@ -785,7 +818,7 @@ export default function Homepage() {
     if (importingBundledTemplateId) return;
     setImportingBundledTemplateId(bundledTemplate.id);
     try {
-      const response = await fetch(
+      const response = await templateApiFetch(
         `/api/docx-templates/${encodeURIComponent(bundledTemplate.id)}/import`,
         { method: "POST" },
       );
@@ -798,6 +831,7 @@ export default function Homepage() {
       }
 
       const template = result.template;
+      if (!user) setUploadedTemplates(saveLocalTemplate(template));
       setUploadedTemplates((current) => [
         template,
         ...current.filter((item) => item.id !== template.id),
@@ -859,9 +893,9 @@ export default function Homepage() {
 
     if (item.templateId) {
       try {
-        const response = await fetch(`/api/templates/${item.templateId}`, {
+        const response = await templateApiFetch(`/api/templates/${item.templateId}`, {
           cache: "no-store",
-        });
+        }, item.templateId);
         const result = (await response.json()) as {
           template?: StoredTemplate;
           error?: string;
@@ -1264,7 +1298,7 @@ export default function Homepage() {
     formData.append("file", file);
 
     try {
-      const response = await fetch("/api/templates", {
+      const response = await templateApiFetch("/api/templates", {
         method: "POST",
         body: formData,
       });
@@ -1279,6 +1313,7 @@ export default function Homepage() {
 
       if (!user) {
         try {
+          setUploadedTemplates(saveLocalTemplate(result.template));
           recordAnonymousUpload();
           setItems(
             formatUserDocuments(
@@ -1355,9 +1390,10 @@ export default function Homepage() {
   const finishEditingTemplate = async () => {
     if (!activeTemplateId) return;
     try {
-      const templateResponse = await fetch(
+      const templateResponse = await templateApiFetch(
         `/api/templates/${activeTemplateId}`,
         { cache: "no-store" },
+        activeTemplateId,
       );
       const templateResult = (await templateResponse.json()) as {
         template?: StoredTemplate;
@@ -1398,9 +1434,9 @@ export default function Homepage() {
         }
       }
 
-      const response = await fetch(`/api/templates/${activeTemplateId}/inspect`, {
+      const response = await templateApiFetch(`/api/templates/${activeTemplateId}/inspect`, {
         cache: "no-store",
-      });
+      }, activeTemplateId);
       const result = (await response.json()) as {
         placeholders?: string[];
         error?: string;
@@ -1486,10 +1522,10 @@ export default function Homepage() {
 
     setIsGeneratingDocx(true);
     try {
-      const response = await fetch("/api/generate", {
+      const response = await templateApiFetch("/api/generate", {
         method: "POST",
         body: formData,
-      });
+      }, activeTemplateId);
 
       if (!response.ok) {
         const result = (await response.json()) as { error?: string };
@@ -1695,9 +1731,9 @@ export default function Homepage() {
     if (!activeTemplateId) return;
     setDocxError("");
     try {
-      const response = await fetch(`/api/templates/${activeTemplateId}/inspect`, {
+      const response = await templateApiFetch(`/api/templates/${activeTemplateId}/inspect`, {
         cache: "no-store",
-      });
+      }, activeTemplateId);
       const result = (await response.json()) as {
         placeholders?: string[];
         error?: string;
@@ -2653,6 +2689,12 @@ export default function Homepage() {
                   templateName={selectedTemplate.title}
                   error={docxError}
                   onDirtyChange={setIsEditorDirty}
+                  onTemplateUpdated={(template) => {
+                    setUploadedTemplates((current) => [
+                      template,
+                      ...current.filter((entry) => entry.id !== template.id),
+                    ]);
+                  }}
                   onContinue={finishEditingTemplate}
                   onCancel={closeGenerator}
                 />

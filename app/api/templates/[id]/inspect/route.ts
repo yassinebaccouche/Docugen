@@ -1,14 +1,17 @@
 import { inspectTemplate, TemplateError } from "@/app/lib/docx-template";
 import { readBundledDocxTemplate } from "@/app/lib/bundled-docx-templates";
-import { readStoredTemplateFile } from "@/app/lib/template-store";
+import {
+  getTemplateAccess,
+  readStoredTemplateFile,
+} from "@/app/lib/template-store";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   const file =
-    (await readStoredTemplateFile(id)) ??
+    (await readStoredTemplateFile(id, getTemplateAccess(request))) ??
     (await readBundledDocxTemplate(id))?.bytes ??
     null;
   if (!file) {

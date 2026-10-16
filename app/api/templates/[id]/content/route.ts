@@ -5,18 +5,20 @@ import {
 import { TemplateError } from "@/app/lib/docx-template";
 import {
   getStoredTemplate,
+  getTemplateAccess,
   readStoredTemplateFile,
   saveEditedTemplate,
 } from "@/app/lib/template-store";
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  const access = getTemplateAccess(request);
   const [template, file] = await Promise.all([
-    getStoredTemplate(id),
-    readStoredTemplateFile(id),
+    getStoredTemplate(id, access),
+    readStoredTemplateFile(id, access),
   ]);
   if (!template || !file) {
     return Response.json({ error: "Ce modèle n’existe plus." }, { status: 404 });
@@ -40,8 +42,9 @@ export async function PUT(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const template = await getStoredTemplate(id);
-  const file = await readStoredTemplateFile(id);
+  const access = getTemplateAccess(request);
+  const template = await getStoredTemplate(id, access);
+  const file = await readStoredTemplateFile(id, access);
   if (!template || !file) {
     return Response.json({ error: "Ce modèle n’existe plus." }, { status: 404 });
   }
@@ -67,7 +70,7 @@ export async function PUT(
 
   try {
     const updatedFile = updateEditableParagraphs(file, body.paragraphs);
-    const savedTemplate = await saveEditedTemplate(id, updatedFile);
+    const savedTemplate = await saveEditedTemplate(id, updatedFile, access);
     return Response.json({ template: savedTemplate });
   } catch (error) {
     if (error instanceof TemplateError) {

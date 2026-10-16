@@ -2,9 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { EditableParagraph } from "@/app/lib/docx-editor";
+import type { StoredTemplate } from "@/app/lib/template-store";
+import { saveLocalTemplate } from "@/app/lib/local-template-store";
+import { templateApiFetch } from "@/app/lib/template-api-client";
 
 interface EditorResponse {
-  template: { saveVersion: number };
+  template: StoredTemplate;
   paragraphs: EditableParagraph[];
 }
 
@@ -13,6 +16,7 @@ interface DocxEditorProps {
   templateName: string;
   error: string;
   onDirtyChange: (dirty: boolean) => void;
+  onTemplateUpdated: (template: StoredTemplate) => void;
   onContinue: () => Promise<void>;
   onCancel: () => void;
 }
@@ -34,6 +38,7 @@ export default function DocxEditor({
   templateName,
   error,
   onDirtyChange,
+  onTemplateUpdated,
   onContinue,
   onCancel,
 }: DocxEditorProps) {
@@ -46,7 +51,11 @@ export default function DocxEditor({
 
   useEffect(() => {
     let active = true;
-    void fetch(`/api/templates/${templateId}/content`, { cache: "no-store" })
+    void templateApiFetch(
+      `/api/templates/${templateId}/content`,
+      { cache: "no-store" },
+      templateId,
+    )
       .then(async (response) => {
         const result = (await response.json()) as EditorResponse & { error?: string };
         if (!response.ok) throw new Error(result.error ?? "Impossible d’ouvrir le modèle.");
@@ -77,15 +86,23 @@ export default function DocxEditor({
         const updatedParagraphs = paragraphRefs.current.map(
           (paragraph) => paragraph?.textContent ?? "",
         );
-        const response = await fetch(`/api/templates/${templateId}/content`, {
+        const response = await templateApiFetch(`/api/templates/${templateId}/content`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ paragraphs: updatedParagraphs }),
-        });
-        const result = (await response.json()) as { error?: string };
+        }, templateId);
+        const result = (await response.json()) as {
+          template?: StoredTemplate;
+          error?: string;
+        };
         if (!response.ok) {
           throw new Error(result.error ?? "Impossible d’enregistrer le modèle.");
         }
+        if (!result.template) {
+          throw new Error("Le serveur n’a pas confirmé l’enregistrement du modèle.");
+        }
+        saveLocalTemplate(result.template);
+        onTemplateUpdated(result.template);
       }
       setDirty(false);
       onDirtyChange(false);
