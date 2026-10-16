@@ -59,6 +59,10 @@ service cloud.firestore {
         ]);
     }
 
+    match /docugenTemplates/{templateId} {
+      allow read, write: if false;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId)

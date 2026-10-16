@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { get, list, put } from "@vercel/blob";
 import {
   mkdir,
   readFile,
@@ -17,6 +16,7 @@ import {
 } from "./cloudinary";
 import { getDocxThumbnail } from "./docx-thumbnail";
 import { validateTemplateFile } from "./docx-template";
+import { getTemplateMetadataFirestore } from "./firebase-admin";
 import {
   getDocumentServerPublicAppUrl,
   getEditorServerUrl,
@@ -41,18 +41,12 @@ export interface OnlyOfficeEditorConfig {
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_TEMPLATE_SIZE = 10 * 1024 * 1024;
-const BLOB_METADATA_PREFIX = "docugen/templates/";
+const TEMPLATE_COLLECTION = "docugenTemplates";
 const DOCX_CONTENT_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
-function usesBlobStorage(): boolean {
-  if (process.env.BLOB_READ_WRITE_TOKEN) return true;
-  if (process.env.VERCEL === "1") {
-    throw new Error(
-      "Template storage is not configured. Connect a Vercel Blob store and add its BLOB_READ_WRITE_TOKEN to this deployment.",
-    );
-  }
-  return false;
+function usesFirestoreMetadata(): boolean {
+  return process.env.VERCEL === "1" || Boolean(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
 }
 
 function storeDirectory(): string {
@@ -82,15 +76,14 @@ function metadataPath(id: string): string {
 }
 
 async function readMetadata(id: string): Promise<StoredTemplate | null> {
-  if (usesBlobStorage()) {
-    const result = await get(`${BLOB_METADATA_PREFIX}${id}.json`, {
-      access: "private",
-    });
-    if (!result) return null;
-    if (result.statusCode !== 200) {
-      throw new Error(`Unable to read metadata for template "${id}".`);
-    }
-    return parseMetadata(await new Response(result.stream).text(), id);
+  if (usesFirestoreMetadata()) {
+    const snapshot = await getTemplateMetadataFirestore()
+      .collection(TEMPLATE_COLLECTION)
+      .doc(id)
+      .get();
+    return snapshot.exists
+      ? parseMetadata(JSON.stringify(snapshot.data()), id)
+      : null;
   }
 
   try {
@@ -134,16 +127,11 @@ function parseMetadata(json: string, id: string): StoredTemplate {
 }
 
 async function writeMetadata(metadata: StoredTemplate): Promise<void> {
-  if (usesBlobStorage()) {
-    await put(
-      `${BLOB_METADATA_PREFIX}${metadata.id}.json`,
-      JSON.stringify(metadata),
-      {
-        access: "private",
-        allowOverwrite: true,
-        contentType: "application/json",
-      },
-    );
+  if (usesFirestoreMetadata()) {
+    await getTemplateMetadataFirestore()
+      .collection(TEMPLATE_COLLECTION)
+      .doc(metadata.id)
+      .set(metadata);
     return;
   }
 
@@ -154,7 +142,8 @@ async function writeMetadata(metadata: StoredTemplate): Promise<void> {
 /** Stores a validated DOCX in Cloudinary and metadata in persistent storage. */
 export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> {
   validateTemplateFile(file);
-  const useBlobStorage = usesBlobStorage();
+  const useFirestore = usesFirestoreMetadata();
+  if (useFirestore) getTemplateMetadataFirestore();
   const bytes = Buffer.from(await file.arrayBuffer());
   if (bytes.length > MAX_TEMPLATE_SIZE) {
     throw new Error("The DOCX template exceeds the 10 MB limit.");
@@ -187,8 +176,15 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
     metadata.thumbnailUrl = thumbnailAsset.url;
   }
 
-  if (useBlobStorage) {
-    await writeMetadata(metadata);
+  if (useFirestore) {
+    try {
+      await writeMetadata(metadata);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Firestore write failed.";
+      throw new Error(
+        `Le fichier a été téléversé sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
+      );
+    }
   } else {
     await mkdir(storeDirectory(), { recursive: true });
     try {
@@ -207,32 +203,14 @@ export async function saveUploadedTemplate(file: File): Promise<StoredTemplate> 
 
 /** Lists templates newest first; an empty storage directory is a first-run store. */
 export async function listStoredTemplates(): Promise<StoredTemplate[]> {
-  if (usesBlobStorage()) {
-    const records: StoredTemplate[] = [];
-    let cursor: string | undefined;
-    do {
-      const result = await list({
-        prefix: BLOB_METADATA_PREFIX,
-        ...(cursor ? { cursor } : {}),
-      });
-      const pageRecords = await Promise.all(
-        result.blobs
-          .map((blob) => blob.pathname.slice(BLOB_METADATA_PREFIX.length))
-          .filter((name) => /^[0-9a-f-]+\.json$/i.test(name))
-          .map((name) => readMetadata(name.slice(0, -5))),
-      );
-      records.push(
-        ...pageRecords.filter(
-          (record): record is StoredTemplate => record !== null,
-        ),
-      );
-      if (result.hasMore && !result.cursor) {
-        throw new Error("Vercel Blob did not return a template-list cursor.");
-      }
-      cursor = result.hasMore ? result.cursor : undefined;
-    } while (cursor);
-
-    return records
+  if (usesFirestoreMetadata()) {
+    const snapshot = await getTemplateMetadataFirestore()
+      .collection(TEMPLATE_COLLECTION)
+      .get();
+    return snapshot.docs
+      .map((document) =>
+        parseMetadata(JSON.stringify(document.data()), document.id),
+      )
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
@@ -263,7 +241,7 @@ export async function getStoredTemplate(id: string): Promise<StoredTemplate | nu
 
 export async function readStoredTemplateFile(id: string): Promise<Buffer | null> {
   if (!isTemplateId(id)) return null;
-  if (usesBlobStorage()) {
+  if (usesFirestoreMetadata()) {
     const metadata = await readMetadata(id);
     if (!metadata?.cloudinary?.url) return null;
     const response = await fetch(metadata.cloudinary.url, { cache: "no-store" });
@@ -325,8 +303,15 @@ export async function saveEditedTemplate(
     );
     nextMetadata.thumbnailUrl = thumbnailAsset.url;
   }
-  if (usesBlobStorage()) {
-    await writeMetadata(nextMetadata);
+  if (usesFirestoreMetadata()) {
+    try {
+      await writeMetadata(nextMetadata);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "Firestore write failed.";
+      throw new Error(
+        `La nouvelle version a été téléversée sur Cloudinary, mais Firestore n’a pas pu enregistrer ses métadonnées : ${reason}`,
+      );
+    }
   } else {
     const temporaryFile = `${templatePath(id)}.${randomUUID()}.tmp`;
 

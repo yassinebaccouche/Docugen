@@ -51,7 +51,7 @@ app/
     docx-editor     Read and update editable DOCX paragraph text
     docx-thumbnail  Extract embedded preview/document images
     spreadsheet     Parse and map Excel/CSV rows to template fields
-    template-store  Local file-backed template repository
+    template-store  Cloudinary/Firestore and local template repository
 ```
 
 Route handlers should remain thin: handle HTTP input/output and delegate
@@ -85,12 +85,14 @@ configured Firebase project.
 
 Uploaded DOCX templates are stored in Cloudinary as raw assets and kept on a
 local working copy for local development. On Vercel, the DOCX binary remains in
-Cloudinary and its template metadata is stored in a private Vercel Blob store,
-because Vercel function filesystems are read-only and ephemeral. Create a Blob
-store in the Vercel project and connect it to the deployment so Vercel sets
-`BLOB_READ_WRITE_TOKEN`; without it, template operations fail with a clear
-configuration error instead of trying to write under `/var/task`. The
-Cloudinary cloud name and unsigned upload preset are configured in
+Cloudinary and its template metadata is stored in the existing Firebase
+Firestore project using a server-only Firebase Admin credential, because Vercel
+function filesystems are read-only and ephemeral. Configure
+`FIREBASE_SERVICE_ACCOUNT_JSON` in Vercel with a dedicated service account key
+that has the **Cloud Datastore User** role. The Admin SDK writes only to the
+`docugenTemplates` collection; client Firestore rules deny access to that
+collection. Never expose or commit this credential. The Cloudinary cloud name
+and unsigned upload preset are configured in
 `app/lib/cloudinary.ts`; the current defaults are `yal4swpi` and `ml_default`.
 Edited templates are uploaded as new Cloudinary versions so the preset can keep overwrite disabled. Each
 signed-in user's Firestore document record contains the Cloudinary URL and
@@ -113,22 +115,26 @@ they support up to 200 files and 250 MB per archive.
 Configure Cloudinary to allow unsigned raw uploads for this preset before
 importing documents. In local development, working copies and metadata are
 kept in `.docugen-data/` by default; set `DOCUGEN_DATA_DIR` to use a different
-directory or mounted persistent disk. On Vercel, metadata uses the connected
-Blob store and current DOCX files are fetched from Cloudinary.
+directory or mounted persistent disk. On Vercel, metadata uses Firestore and
+current DOCX files are fetched from Cloudinary.
 
 ### Vercel setup and troubleshooting
 
-In the Vercel project, create a Blob store under **Storage**, connect it to this
-project, and redeploy so `BLOB_READ_WRITE_TOKEN` is available to the function.
-The Firebase warning is separate: add `docugen-alpha.vercel.app` to
-**Firebase Console → Authentication → Settings → Authorized domains**.
+Create a dedicated service account in Google Cloud IAM for the Firebase
+project, grant it **Cloud Datastore User**, and create a JSON key. Add the
+complete JSON key as the `FIREBASE_SERVICE_ACCOUNT_JSON` environment variable
+in Vercel for Production and redeploy. Do not paste the key into source control
+or chat. The Firebase sign-in warning is separate: add
+`docugen-alpha.vercel.app` to **Firebase Console → Authentication → Settings
+→ Authorized domains**.
 
-If an import fails specifically with `mkdir '/var/task/.docugen-data'`, the
-Cloudinary upload step ran before the failing local-filesystem write. The
-uploaded asset may therefore already be in Cloudinary, but without saved
-template metadata the app cannot list or open it. Connect Blob storage, then
-import that document again. A Cloudinary upload/configuration failure is
-reported before the local metadata-storage step.
+If an import fails specifically with `mkdir '/var/task/.docugen-data'`, that
+was an older deployment attempting to write metadata to Vercel's
+read-only filesystem. The Cloudinary upload happens before metadata storage,
+so that failed import may already have left a DOCX asset in Cloudinary without
+a Firestore record. After setting `FIREBASE_SERVICE_ACCOUNT_JSON`, redeploy and
+import that document again. Current Cloudinary upload failures return the
+Cloudinary error; Firestore metadata failures are reported separately.
 
 The built-in DOCX gallery is loaded from `app/Docx`; add or remove `.docx`
 files in that folder to update the bundled template cards. Clicking a bundled
