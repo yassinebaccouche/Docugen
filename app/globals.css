@@ -4100,3 +4100,127 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+.template-strip {
+  display: flex;
+  gap: 18px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 4px 2px 16px;
+  scroll-padding-inline: 2px;
+  scroll-snap-type: x mandatory;
+  scrollbar-color: #b9c9d7 transparent;
+  scrollbar-width: thin;
+}
+
+.template-strip .template-card {
+  width: 224px;
+  height: 326px;
+  min-height: 326px;
+  flex: 0 0 224px;
+  gap: 10px;
+  padding: 14px 12px;
+  scroll-snap-align: start;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.template-strip .template-card:hover {
+  transform: none;
+  border: 0;
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: none;
+}
+
+.template-strip .uploaded-template-open {
+  justify-content: flex-start;
+}
+
+.template-strip .uploaded-template-card .uploaded-template-preview,
+.template-strip .upload-template-icon {
+  width: 190px;
+  height: 236px;
+  max-width: 100%;
+  flex: 0 0 236px;
+  aspect-ratio: auto;
+  margin: 0 auto 4px;
+  border: 1px solid #e1e7eb;
+  border-radius: 5px;
+  background: rgba(248, 250, 251, 0.88);
+}
+
+.template-strip .uploaded-template-card .uploaded-template-preview .page {
+  max-height: 100%;
+}
+
+.template-strip .template-title,
+.template-strip .template-subtitle {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-strip .uploaded-template-selected {
+  border: 1px solid var(--green);
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 1px var(--green);
+}
+
+.template-strip .upload-template-card {
+  justify-content: flex-start;
+}
+
+.recent-grid:not(.list-view) {
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
+  align-items: stretch;
+}
+
+.recent-grid:not(.list-view) .recent-card {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+
+.recent-grid:not(.list-view) .recent-preview {
+  aspect-ratio: 0.9;
+  flex: 0 0 auto;
+}
+
+.recent-grid:not(.list-view) .recent-meta {
+  flex: 1;
+}
+
+@media (max-width: 600px) {
+  .template-strip {
+    gap: 12px;
+    margin-right: -2px;
+  }
+
+  .template-strip .template-card {
+    width: 190px;
+    height: 286px;
+    min-height: 286px;
+    flex-basis: 190px;
+    padding: 12px 10px;
+  }
+
+  .template-strip .uploaded-template-card .uploaded-template-preview,
+  .template-strip .upload-template-icon {
+    width: 162px;
+    height: 204px;
+    flex-basis: 204px;
+  }
+
+  .recent-grid:not(.list-view) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 380px) {
+  .recent-grid:not(.list-view) {
+    grid-template-columns: 1fr;
+  }
+}
